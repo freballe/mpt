@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use ethereum_types::H256;
 
-pub use crate::nibbles::Nibbles;
+use crate::nibbles::Nibbles;
 
 #[derive(Debug, Clone)]
 pub enum Node {
@@ -71,4 +71,25 @@ pub struct ExtensionNode {
 #[derive(Debug)]
 pub struct HashNode {
     pub hash: H256,
+}
+
+pub fn empty_children() -> [Node; 16] {
+    [
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+        Node::Empty,
+    ]
 }

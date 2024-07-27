@@ -1,10 +1,9 @@
 use std::cmp::min;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Nibbles {
     hex_data: Vec<u8>,
 }
-
 
 impl Nibbles {
     pub fn from_hex(hex: &[u8]) -> Self {
@@ -157,5 +156,20 @@ impl Nibbles {
 
     pub fn push(&mut self, e: u8) {
         self.hex_data.push(e)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_nibble() {
+        let n = Nibbles::from_raw(b"key1", true);
+        let compact = n.encode_compact();
+        let n2: Nibbles = Nibbles::from_compact(&compact);
+        let (raw, is_leaf) = n2.encode_raw();
+        assert!(is_leaf);
+        assert_eq!(raw, b"key1");
     }
 }
