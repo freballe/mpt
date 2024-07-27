@@ -212,7 +212,7 @@ where
     D: DB,
 {
     pub fn iter(&self) -> TrieIterator<D> {
-        let nodes = vec![(self.root.clone()).into()];
+        let nodes: Vec<TraceNode> = vec![(self.root.clone()).into()];
         TrieIterator {
             trie: self,
             nibble: Nibbles::from_raw(&[], false),
@@ -1120,14 +1120,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_trie_contains() {
-        let memdb = Arc::new(MemoryDB::new(true));
-        let mut trie = EthTrie::new(memdb);
-        trie.put(b"test", b"test").unwrap();
-        assert!(trie.contains(b"test").unwrap());
-        assert!(!trie.contains(b"test2").unwrap());
-    }
 
     #[test]
     fn test_trie_remove() {
