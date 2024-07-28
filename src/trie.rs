@@ -44,6 +44,7 @@ pub trait ITrie<D: DB> {
         root_hash: H256,
         key: &[u8],
         proof: Vec<Vec<u8>>,
+        db_name: String,
     ) -> TrieResult<Option<Vec<u8>>>;
 }
 
@@ -371,14 +372,15 @@ where
         }
     }
 
-    /// return value if key exists, None if key not exist, Error if proof is wrong
+    // return value if key exists, None if key not exist, Error if proof is wrong
     fn verify_proof(
         &self,
         root_hash: H256,
         key: &[u8],
         proof: Vec<Vec<u8>>,
+        db_name: String,
     ) -> TrieResult<Option<Vec<u8>>> {
-        let proof_db = Arc::new(SqliteDB::new());
+        let proof_db = Arc::new(SqliteDB::new(String::from(db_name)));
         for node_encoded in proof.into_iter() {
             let hash: H256 = keccak(&node_encoded).as_fixed_bytes().into();
 

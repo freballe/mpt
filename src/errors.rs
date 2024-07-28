@@ -42,11 +42,11 @@ impl From<DecoderError> for TrieError {
 }
 
 #[derive(Debug)]
-pub enum MemDBError {}
+pub enum SqliteDBError {}
 
-impl Error for MemDBError {}
+impl Error for SqliteDBError {}
 
-impl fmt::Display for MemDBError {
+impl fmt::Display for SqliteDBError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "error")
     }

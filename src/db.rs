@@ -1,6 +1,6 @@
 use std::error::Error;
 use rusqlite::{params, Connection, Result};
-use crate::errors::MemDBError;
+use crate::errors::SqliteDBError;
 
 /// "DB" defines the "trait" of trie and database interaction.
 /// You should first write the data to the cache and write the data
@@ -8,16 +8,16 @@ use crate::errors::MemDBError;
 pub trait DB: Send + Sync {
     type Error: Error;
 
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, bool>;
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>;
 
     /// Insert data into the cache.
-    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), bool>;
+    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), Self::Error>;
 
     /// Remove data with given key.
-    fn remove(&self, key: &[u8]) -> Result<(), bool>;
+    fn remove(&self, key: &[u8]) -> Result<(), Self::Error>;
 
     /// Insert a batch of data into the cache.
-    fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), bool> {
+    fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
         for i in 0..keys.len() {
             let key = &keys[i];
             let value = values[i].clone();
@@ -27,7 +27,7 @@ pub trait DB: Send + Sync {
     }
 
     /// Remove a batch of data into the cache.
-    fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), bool> {
+    fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
         for key in keys {
             self.remove(key)?;
         }
@@ -35,7 +35,7 @@ pub trait DB: Send + Sync {
     }
 
     /// Flush data to the DB from the cache.
-    fn flush(&self) -> Result<(), bool>;
+    fn flush(&self) -> Result<(), Self::Error>;
 
     // #[cfg(test)]
     // fn len(&self) -> Result<usize, bool>;
@@ -55,18 +55,18 @@ struct NodeDB {
 }
 
 impl SqliteDB {
-    pub fn new() -> Self {
+    pub fn new(db_name: String) -> Self {
         return SqliteDB {
-            db_name: String::from("trie.db")
+            db_name: String::from(db_name)
         }
     }
 }
 
 // TODO catch all errors
 impl DB for SqliteDB {
-    type Error = MemDBError;
+    type Error = SqliteDBError;
 
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, bool> {
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
         let conn = Connection::open(self.db_name.clone()).unwrap();
 
         _ = conn.execute(
@@ -100,7 +100,7 @@ impl DB for SqliteDB {
         Ok(None)
     }
 
-    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), bool> {
+    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), Self::Error> {
         let conn = Connection::open(self.db_name.clone()).unwrap();
 
         _ = conn.execute(
@@ -121,7 +121,7 @@ impl DB for SqliteDB {
         Ok(())
     }
 
-    fn remove(&self, key: &[u8]) -> Result<(), bool> {
+    fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
         let conn = Connection::open(self.db_name.clone()).unwrap();
 
         let mut stmt = conn.prepare("DELETE FROM trie WHERE key=?1").unwrap();
@@ -130,7 +130,7 @@ impl DB for SqliteDB {
         Ok(())
     }
 
-    fn flush(&self) -> Result<(),  bool> {
+    fn flush(&self) -> Result<(),  Self::Error> {
         Ok(())
     }
 }
