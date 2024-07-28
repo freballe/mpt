@@ -37,10 +37,6 @@ pub trait DB: Send + Sync {
     /// Flush data to the DB from the cache.
     fn flush(&self) -> Result<(), Self::Error>;
 
-    // #[cfg(test)]
-    // fn len(&self) -> Result<usize, bool>;
-    // #[cfg(test)]
-    // fn is_empty(&self) -> Result<bool, bool>;
 }
 
 #[derive(Default, Debug)]

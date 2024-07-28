@@ -40,14 +40,3 @@ impl From<DecoderError> for TrieError {
         TrieError::Decoder(error)
     }
 }
-
-// #[derive(Debug)]
-// pub struct SqliteDBError {}
-
-// impl Error for SqliteDBError {}
-
-// impl fmt::Display for SqliteDBError {
-//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-//         write!(f, "error")
-//     }
-// }

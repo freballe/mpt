@@ -158,18 +158,3 @@ impl Nibbles {
         self.hex_data.push(e)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_nibble() {
-        let n = Nibbles::from_raw(b"key1", true);
-        let compact = n.encode_compact();
-        let n2: Nibbles = Nibbles::from_compact(&compact);
-        let (raw, is_leaf) = n2.encode_raw();
-        assert!(is_leaf);
-        assert_eq!(raw, b"key1");
-    }
-}

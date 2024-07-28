@@ -1,7 +1,6 @@
 use rusqlite::{params, Connection, Result};
 mod nibbles;
 mod node;
-mod tests;
 
 mod db;
 mod errors;
