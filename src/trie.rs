@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use ethereum_types::H256;
 use hashbrown::{HashMap, HashSet};
-use keccak_hash::{keccak, KECCAK_NULL_RLP};
+use keccak_hash::{keccak, KECCAK_EMPTY, KECCAK_NULL_RLP};
 use log::warn;
 use rlp::{Prototype, Rlp, RlpStream};
 
@@ -14,19 +14,25 @@ use crate::node::{empty_children, BranchNode, Node};
 pub type TrieResult<T> = Result<T, TrieError>;
 const HASHED_LENGTH: usize = 32;
 
+use std::fs;
+fn delete_file(path:String) -> std::io::Result<()> {
+    fs::remove_file(path)?;
+    Ok(())
+}
+
 pub trait ITrie<D: DB> {
     /// Returns the value for key stored in the trie.
     fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>>;
 
     /// Inserts value into trie and modifies it if it exists
-    fn put(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()>;
+    fn put(&mut self, key: &[u8], value: &[u8]) -> ();
 
     /// Removes any existing value for key from the trie.
-    fn del(&mut self, key: &[u8]) -> TrieResult<bool>;
+    fn del(&mut self, key: &[u8]) -> TrieResult<()>;
 
     /// Saves all the nodes in the db, clears the cache data, recalculates the root.
     /// Returns the root hash of the trie.
-    fn commit(&mut self) -> TrieResult<H256>;
+    fn commit(&mut self) -> H256;
 
     /// Prove constructs a merkle proof for key. The result contains all encoded nodes
     /// on the path to the value at key. The value itself is also included in the last
@@ -36,16 +42,7 @@ pub trait ITrie<D: DB> {
     /// nodes of the longest existing prefix of the key (at least the root node), ending
     /// with the node that proves the absence of the key.
     // TODO refactor encode_raw() so that it doesn't need a &mut self
-    fn proof(&mut self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>>;
-
-    /// return value if key exists, None if key not exist, Error if proof is wrong
-    fn verify_proof(
-        &self,
-        root_hash: H256,
-        key: &[u8],
-        proof: Vec<Vec<u8>>,
-        db_name: String,
-    ) -> TrieResult<Option<Vec<u8>>>;
+    fn proof(&mut self, key: &[u8]) -> TrieResult<Vec<Vec<u8>>>;    
 }
 
 #[derive(Debug)]
@@ -275,36 +272,19 @@ where
     }
 
     /// Inserts value into trie and modifies it if it exists
-    fn put(&mut self, key: &[u8], value: &[u8]) -> TrieResult<()> {
+    fn put(&mut self, key: &[u8], value: &[u8]) -> () {
         if value.is_empty() {
-            self.del(key)?;
-            return Ok(());
+            self.del(key);
+            return ();
         }
         let root = self.root.clone();
         let path = &Nibbles::from_raw(key, true);
         let result = self.insert_at(root, path, 0, value.to_vec());
-
-        if let Err(TrieError::MissingTrieNode {
-            node_hash,
-            traversed,
-            root_hash,
-            err_key: _,
-        }) = result
-        {
-            Err(TrieError::MissingTrieNode {
-                node_hash,
-                traversed,
-                root_hash,
-                err_key: Some(key.to_vec()),
-            })
-        } else {
-            self.root = result?;
-            Ok(())
-        }
+        self.root = result.unwrap();       
     }
 
     /// Removes any existing value for key from the trie.
-    fn del(&mut self, key: &[u8]) -> TrieResult<bool> {
+    fn del(&mut self, key: &[u8]) -> TrieResult<()> {
         let path = &Nibbles::from_raw(key, true);
         let result = self.delete_at(&self.root.clone(), path, 0);
 
@@ -322,15 +302,15 @@ where
                 err_key: Some(key.to_vec()),
             })
         } else {
-            let (n, removed) = result?;
+            let (n, removed) = result.unwrap();
             self.root = n;
-            Ok(removed)
+            Ok(())
         }
     }
 
     /// Saves all the nodes in the db, clears the cache data, recalculates the root.
     /// Returns the root hash of the trie.
-    fn commit(&mut self) -> TrieResult<H256> {
+    fn commit(&mut self) -> H256 {
         self.commit()
     }
 
@@ -371,26 +351,6 @@ where
                 .collect())
         }
     }
-
-    // return value if key exists, None if key not exist, Error if proof is wrong
-    fn verify_proof(
-        &self,
-        root_hash: H256,
-        key: &[u8],
-        proof: Vec<Vec<u8>>,
-        db_name: String,
-    ) -> TrieResult<Option<Vec<u8>>> {
-        let proof_db = Arc::new(SqliteDB::new(String::from(db_name)));
-        for node_encoded in proof.into_iter() {
-            let hash: H256 = keccak(&node_encoded).as_fixed_bytes().into();
-
-            if root_hash.eq(&hash) || node_encoded.len() >= HASHED_LENGTH {
-                proof_db.insert(hash.as_bytes(), node_encoded).unwrap();
-            }
-        }
-        let trie = EthTrie::new(proof_db).at_root(root_hash);
-        trie.get(key).or(Err(TrieError::InvalidProof))
-    }
 }
 
 impl<D> EthTrie<D>
@@ -404,13 +364,28 @@ where
         path_index: usize,
     ) -> TrieResult<Option<Vec<u8>>> {
         let partial = &path.offset(path_index);
+        //println!("{:?} AAAA {:?}", partial, source_node);
         match source_node {
-            Node::Empty => Ok(None),
+            Node::Empty => {
+                Err(TrieError::MissingTrieNode {
+                    node_hash: KECCAK_EMPTY,
+                    traversed: Some(path.slice(0, path_index)),
+                    root_hash: Some(self.root_hash),
+                    err_key: None,
+                })
+                //Ok(None)
+            }, //Ok(None),
             Node::Leaf(leaf) => {
                 if &leaf.key == partial {
                     Ok(Some(leaf.value.clone()))
                 } else {
-                    Ok(None)
+                    Err(TrieError::MissingTrieNode {
+                        node_hash: KECCAK_EMPTY,
+                        traversed: Some(path.slice(0, path_index)),
+                        root_hash: Some(self.root_hash),
+                        err_key: None,
+                    })
+                    //Ok(None)
                 }
             }
             Node::Branch(branch) => {
@@ -431,7 +406,13 @@ where
                 if match_len == prefix.len() {
                     self.get_at(&extension.node, path, path_index + match_len)
                 } else {
-                    Ok(None)
+                    Err(TrieError::MissingTrieNode {
+                        node_hash: KECCAK_EMPTY,
+                        traversed: Some(path.slice(0, path_index)),
+                        root_hash: Some(self.root_hash),
+                        err_key: None,
+                    })
+                    //Ok(None)
                 }
             }
             Node::Hash(hash_node) => {
@@ -754,7 +735,7 @@ where
         }
     }
 
-    fn commit(&mut self) -> TrieResult<H256> {
+    fn commit(&mut self) -> H256 {
         let root_hash = match self.write_node(&self.root.clone()) {
             EncodedNode::Hash(hash) => hash,
             EncodedNode::Inline(encoded) => {
@@ -771,9 +752,7 @@ where
             values.push(v);
         }
 
-        self.db
-            .insert_batch(keys, values)
-            .map_err(|e| TrieError::DB(e.to_string()))?;
+        self.db.insert_batch(keys, values);
 
         let removed_keys: Vec<Vec<u8>> = self
             .passing_keys
@@ -782,17 +761,13 @@ where
             .map(|h| h.to_vec())
             .collect();
 
-        self.db
-            .remove_batch(&removed_keys)
-            .map_err(|e| TrieError::DB(e.to_string()))?;
+        self.db.remove_batch(&removed_keys);
 
         self.root_hash = root_hash;
         self.gen_keys.clear();
         self.passing_keys.clear();
-        self.root = self
-            .recover_from_db(root_hash)?
-            .expect("The root that was just created is missing");
-        Ok(root_hash)
+        self.root = self.recover_from_db(root_hash).unwrap().unwrap();
+        root_hash
     }
 
     fn write_node(&mut self, to_encode: &Node) -> EncodedNode {
@@ -908,7 +883,7 @@ where
         let node = match self
             .db
             .get(key.as_bytes())
-            .map_err(|e| TrieError::DB(e.to_string()))?
+            .map_err(|e| TrieError::SqliteDB(e.to_string()))?
         {
             Some(value) => Some(Self::decode_node(&value)?),
             None => None,
@@ -932,19 +907,26 @@ mod tests {
     use crate::db::{SqliteDB, DB};
     use crate::errors::TrieError;
     use crate::nibbles::Nibbles;
+    use std::fs;
+    fn delete_file(path:String) -> std::io::Result<()> {
+        fs::remove_file(path)?;
+        Ok(())
+    }
 
     #[test]
     fn test_trie_insert() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let mut trie = EthTrie::new(memdb);
-        trie.put(b"test", b"test").unwrap();
+        trie.put(b"test", b"test");
     }
 
     #[test]
     fn test_trie_get() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let mut trie = EthTrie::new(memdb);
-        trie.put(b"test", b"test").unwrap();
+        trie.put(b"test", b"test");
         let v = trie.get(b"test").unwrap();
 
         assert_eq!(Some(b"test".to_vec()), v)
@@ -952,23 +934,24 @@ mod tests {
 
     #[test]
     fn test_trie_get_missing() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let mut trie = EthTrie::new(memdb);
-        trie.put(b"test", b"test").unwrap();
+        trie.put(b"test", b"test");
         let v = trie.get(b"no-val").unwrap();
 
         assert_eq!(None, v)
     }
 
     fn corrupt_trie() -> (EthTrie<SqliteDB>, H256, H256) {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let corruptor_db = memdb.clone();
         let mut trie = EthTrie::new(memdb);
-        trie.put(b"test1-key", b"really-long-value1-to-prevent-inlining")
-            .unwrap();
-        trie.put(b"test2-key", b"really-long-value2-to-prevent-inlining")
-            .unwrap();
-        let actual_root_hash = trie.commit().unwrap();
+        trie.put(b"test1-key", b"really-long-value1-to-prevent-inlining");
+        trie.put(b"test2-key", b"really-long-value2-to-prevent-inlining");
+    
+        let actual_root_hash = trie.commit();
 
         // Manually corrupt the database by removing a trie node
         // This is the hash for the leaf node for test2-key
@@ -1081,32 +1064,9 @@ mod tests {
     }
 
     #[test]
-    /// When a database entry is missing, insert returns a MissingTrieNode error
-    fn test_trie_insert_corrupt() {
-        let (mut trie, actual_root_hash, deleted_node_hash) = corrupt_trie();
-
-        let result = trie.put(b"test2-neighbor", b"any");
-
-        if let Err(missing_trie_node) = result {
-            let expected_error = TrieError::MissingTrieNode {
-                node_hash: deleted_node_hash,
-                traversed: Some(Nibbles::from_hex(&[7, 4, 6, 5, 7, 3, 7, 4, 3, 2])),
-                root_hash: Some(actual_root_hash),
-                err_key: Some(b"test2-neighbor".to_vec()),
-            };
-            assert_eq!(missing_trie_node, expected_error);
-        } else {
-            // The only acceptable result here was a MissingTrieNode
-            panic!(
-                "Must get a MissingTrieNode when database entry is missing, but got {:?}",
-                result
-            );
-        }
-    }
-
-    #[test]
     fn test_trie_random_insert() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let mut trie = EthTrie::new(memdb);
 
         for _ in 0..1000 {
@@ -1116,7 +1076,7 @@ mod tests {
                 .map(char::from)
                 .collect();
             let val = rand_str.as_bytes();
-            trie.put(val, val).unwrap();
+            trie.put(val, val);
 
             let v = trie.get(val).unwrap();
             assert_eq!(v.map(|v| v.to_vec()), Some(val.to_vec()));
@@ -1126,16 +1086,19 @@ mod tests {
 
     #[test]
     fn test_trie_remove() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let mut trie = EthTrie::new(memdb);
-        trie.put(b"test", b"test").unwrap();
-        let removed = trie.del(b"test").unwrap();
-        assert!(removed)
+        trie.put(b"test", b"test");
+        trie.del(b"test");
+        let found = trie.get(b"test");
+        assert!(found.is_err())
     }
 
     #[test]
     fn test_trie_random_remove() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let mut trie = EthTrie::new(memdb);
 
         for _ in 0..1000 {
@@ -1145,25 +1108,28 @@ mod tests {
                 .map(char::from)
                 .collect();
             let val = rand_str.as_bytes();
-            trie.put(val, val).unwrap();
+            trie.put(val, val);
 
-            let removed = trie.del(val).unwrap();
-            assert!(removed);
+            trie.del(val);
+            
+            let found = trie.get(val);
+            assert!(found.is_err())
         }
     }
 
     #[test]
     fn test_trie_at_root_six_keys() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let root = {
             let mut trie = EthTrie::new(memdb.clone());
-            trie.put(b"test", b"test").unwrap();
-            trie.put(b"test1", b"test").unwrap();
-            trie.put(b"test2", b"test").unwrap();
-            trie.put(b"test23", b"test").unwrap();
-            trie.put(b"test33", b"test").unwrap();
-            trie.put(b"test44", b"test").unwrap();
-            trie.commit().unwrap()
+            trie.put(b"test", b"test");
+            trie.put(b"test1", b"test");
+            trie.put(b"test2", b"test");
+            trie.put(b"test23", b"test");
+            trie.put(b"test33", b"test");
+            trie.put(b"test44", b"test");
+            trie.commit()
         };
 
         let mut trie = EthTrie::new(memdb).at_root(root);
@@ -1171,52 +1137,54 @@ mod tests {
         assert_eq!(Some(b"test".to_vec()), v1);
         let v2 = trie.get(b"test44").unwrap();
         assert_eq!(Some(b"test".to_vec()), v2);
-        let root2 = trie.commit().unwrap();
+        let root2 = trie.commit();
         assert_eq!(hex::encode(root), hex::encode(root2));
     }
 
     #[test]
     fn test_trie_at_root_and_insert() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let root = {
             let mut trie = EthTrie::new(Arc::clone(&memdb));
-            trie.put(b"test", b"test").unwrap();
-            trie.put(b"test1", b"test").unwrap();
-            trie.put(b"test2", b"test").unwrap();
-            trie.put(b"test23", b"test").unwrap();
-            trie.put(b"test33", b"test").unwrap();
-            trie.put(b"test44", b"test").unwrap();
-            trie.commit().unwrap()
+            trie.put(b"test", b"test");
+            trie.put(b"test1", b"test");
+            trie.put(b"test2", b"test");
+            trie.put(b"test23", b"test");
+            trie.put(b"test33", b"test");
+            trie.put(b"test44", b"test");
+            trie.commit()
         };
 
         let mut trie = EthTrie::new(memdb).at_root(root);
-        trie.put(b"test55", b"test55").unwrap();
-        trie.commit().unwrap();
+        trie.put(b"test55", b"test55");
+        trie.commit();
         let v = trie.get(b"test55").unwrap();
         assert_eq!(Some(b"test55".to_vec()), v);
     }
 
     #[test]
     fn test_trie_at_root_and_delete() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let root = {
             let mut trie = EthTrie::new(Arc::clone(&memdb));
-            trie.put(b"test", b"test").unwrap();
-            trie.put(b"test1", b"test").unwrap();
-            trie.put(b"test2", b"test").unwrap();
-            trie.put(b"test23", b"test").unwrap();
-            trie.put(b"test33", b"test").unwrap();
-            trie.put(b"test44", b"test").unwrap();
-            trie.commit().unwrap()
+            trie.put(b"test", b"test");
+            trie.put(b"test1", b"test");
+            trie.put(b"test2", b"test");
+            trie.put(b"test23", b"test");
+            trie.put(b"test33", b"test");
+            trie.put(b"test44", b"test");
+            trie.commit()
         };
 
         let mut trie = EthTrie::new(memdb).at_root(root);
-        let removed = trie.del(b"test44").unwrap();
-        assert!(removed);
-        let removed = trie.del(b"test33").unwrap();
-        assert!(removed);
-        let removed = trie.del(b"test23").unwrap();
-        assert!(removed);
+        trie.del(b"test44").unwrap();
+        trie.del(b"test33").unwrap();
+        trie.del(b"test23").unwrap();
+        trie.commit();
+        let found = trie.get(b"test");
+        assert!(found.is_err())
     }
 
     #[test]
@@ -1226,32 +1194,35 @@ mod tests {
         let v: ethereum_types::H256 = ethereum_types::H256::random();
 
         let root1 = {
-            let memdb = Arc::new(SqliteDB::new());
+            delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
             let mut trie = EthTrie::new(memdb);
-            trie.put(k0.as_bytes(), v.as_bytes()).unwrap();
-            trie.commit().unwrap()
+            trie.put(k0.as_bytes(), v.as_bytes());
+            trie.commit()
         };
 
         let root2 = {
-            let memdb = Arc::new(SqliteDB::new());
+            delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
             let mut trie = EthTrie::new(memdb);
-            trie.put(k0.as_bytes(), v.as_bytes()).unwrap();
-            trie.put(k1.as_bytes(), v.as_bytes()).unwrap();
-            trie.commit().unwrap();
+            trie.put(k0.as_bytes(), v.as_bytes());
+            trie.put(k1.as_bytes(), v.as_bytes());
+            trie.commit();
             trie.del(k1.as_ref()).unwrap();
-            trie.commit().unwrap()
+            trie.commit()
         };
 
         let root3 = {
-            let memdb = Arc::new(SqliteDB::new());
+            delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
             let mut trie1 = EthTrie::new(Arc::clone(&memdb));
-            trie1.put(k0.as_bytes(), v.as_bytes()).unwrap();
-            trie1.put(k1.as_bytes(), v.as_bytes()).unwrap();
-            trie1.commit().unwrap();
-            let root = trie1.commit().unwrap();
+            trie1.put(k0.as_bytes(), v.as_bytes());
+            trie1.put(k1.as_bytes(), v.as_bytes());
+            trie1.commit();
+            let root = trie1.commit();
             let mut trie2 = trie1.at_root(root);
             trie2.del(k1.as_bytes()).unwrap();
-            trie2.commit().unwrap()
+            trie2.commit()
         };
 
         assert_eq!(root1, root2);
@@ -1260,7 +1231,8 @@ mod tests {
 
     #[test]
     fn test_delete_stale_keys_with_random_insert_and_delete() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let mut trie = EthTrie::new(memdb);
 
         let mut rng = rand::thread_rng();
@@ -1269,17 +1241,17 @@ mod tests {
             let random_bytes: Vec<u8> = (0..rng.gen_range(2..30))
                 .map(|_| rand::random::<u8>())
                 .collect();
-            trie.put(&random_bytes, &random_bytes).unwrap();
+            trie.put(&random_bytes, &random_bytes);
             keys.push(random_bytes.clone());
         }
-        trie.commit().unwrap();
+        trie.commit();
         let slice = &mut keys;
         slice.shuffle(&mut rng);
 
         for key in slice.iter() {
             trie.del(key).unwrap();
         }
-        trie.commit().unwrap();
+        trie.commit();
 
         let empty_node_key = KECCAK_NULL_RLP;
         let value = trie.db.get(empty_node_key.as_ref()).unwrap().unwrap();
@@ -1288,16 +1260,17 @@ mod tests {
 
     #[test]
     fn insert_full_branch() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let mut trie = EthTrie::new(memdb);
 
-        trie.put(b"test", b"test").unwrap();
-        trie.put(b"test1", b"test").unwrap();
-        trie.put(b"test2", b"test").unwrap();
-        trie.put(b"test23", b"test").unwrap();
-        trie.put(b"test33", b"test").unwrap();
-        trie.put(b"test44", b"test").unwrap();
-        trie.commit().unwrap();
+        trie.put(b"test", b"test");
+        trie.put(b"test1", b"test");
+        trie.put(b"test2", b"test");
+        trie.put(b"test23", b"test");
+        trie.put(b"test33", b"test");
+        trie.put(b"test44", b"test");
+        trie.commit();
 
         let v = trie.get(b"test").unwrap();
         assert_eq!(Some(b"test".to_vec()), v);
@@ -1305,7 +1278,8 @@ mod tests {
 
     #[test]
     fn iterator_trie() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let root1: H256;
         let mut kv = HashMap::new();
         kv.insert(b"test".to_vec(), b"test".to_vec());
@@ -1321,9 +1295,9 @@ mod tests {
             let mut trie = EthTrie::new(memdb.clone());
             let mut kv = kv.clone();
             kv.iter().for_each(|(k, v)| {
-                trie.put(k, v).unwrap();
+                trie.put(k, v);
             });
-            root1 = trie.commit().unwrap();
+            root1 = trie.commit();
 
             trie.iter()
                 .for_each(|(k, v)| assert_eq!(kv.remove(&k).unwrap(), v));
@@ -1341,10 +1315,10 @@ mod tests {
             kv2.insert(b"test16".to_vec(), b"test16".to_vec());
             kv2.insert(b"test2".to_vec(), b"test17".to_vec());
             kv2.iter().for_each(|(k, v)| {
-                trie.put(k, v).unwrap();
+                trie.put(k, v);
             });
 
-            trie.commit().unwrap();
+            trie.commit();
 
             let mut kv_delete = HashSet::new();
             kv_delete.insert(b"test".to_vec());
@@ -1357,7 +1331,7 @@ mod tests {
 
             kv2.retain(|k, _| !kv_delete.contains(k));
 
-            trie.commit().unwrap();
+            trie.commit();
             trie.iter()
                 .for_each(|(k, v)| assert_eq!(kv2.remove(&k).unwrap(), v));
             assert!(kv2.is_empty());
@@ -1371,12 +1345,13 @@ mod tests {
 
     #[test]
     fn test_small_trie_at_root() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let mut trie = EthTrie::new(memdb.clone());
-        trie.put(b"key", b"val").unwrap();
-        let new_root_hash = trie.commit().unwrap();
+        trie.put(b"key", b"val");
+        let new_root_hash = trie.commit();
 
-        let empty_trie = EthTrie::new(memdb);
+        let empty_trie = EthTrie::new(memdb.clone());
         // Can't find key in new trie at empty root
         assert_eq!(empty_trie.get(b"key").unwrap(), None);
 
@@ -1389,14 +1364,14 @@ mod tests {
 
     #[test]
     fn test_large_trie_at_root() {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let mut trie = EthTrie::new(memdb.clone());
         trie.put(
             b"pretty-long-key",
             b"even-longer-val-to-go-more-than-32-bytes",
-        )
-        .unwrap();
-        let new_root_hash = trie.commit().unwrap();
+        );
+        let new_root_hash = trie.commit();
 
         let empty_trie = EthTrie::new(memdb);
         // Can't find key in new trie at empty root

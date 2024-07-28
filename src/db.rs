@@ -1,6 +1,6 @@
 use std::error::Error;
 use rusqlite::{params, Connection, Result};
-use crate::errors::SqliteDBError;
+use crate::errors::TrieError;
 
 /// "DB" defines the "trait" of trie and database interaction.
 /// You should first write the data to the cache and write the data
@@ -64,7 +64,7 @@ impl SqliteDB {
 
 // TODO catch all errors
 impl DB for SqliteDB {
-    type Error = SqliteDBError;
+    type Error = TrieError;
 
     fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
         let conn = Connection::open(self.db_name.clone()).unwrap();
@@ -97,7 +97,7 @@ impl DB for SqliteDB {
             return Ok(node.unwrap().data.clone());
         }
 
-        Ok(None)
+        return Err(TrieError::SqliteDB{0:String::from("db error")});
     }
 
     fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), Self::Error> {
@@ -125,7 +125,7 @@ impl DB for SqliteDB {
         let conn = Connection::open(self.db_name.clone()).unwrap();
 
         let mut stmt = conn.prepare("DELETE FROM trie WHERE key=?1").unwrap();
-        stmt.execute([key.clone()]);
+        stmt.execute([key]);
     
         Ok(())
     }

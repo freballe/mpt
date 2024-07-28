@@ -6,19 +6,25 @@ mod trie_tests {
 
     use crate::db::SqliteDB;
     use crate::trie::{EthTrie, ITrie};
+    use std::fs;
+    fn delete_file(path:String) -> std::io::Result<()> {
+        fs::remove_file(path)?;
+        Ok(())
+    }
 
     fn assert_root(data: Vec<(&[u8], &[u8])>, hash: &str) {
-        let memdb = Arc::new(SqliteDB::new());
+        delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
         let mut trie = EthTrie::new(Arc::clone(&memdb));
         for (k, v) in data.into_iter() {
-            trie.put(k, v).unwrap();
+            trie.put(k, v);
         }
-        let root_hash = trie.commit().unwrap();
+        let root_hash = trie.commit();
         let rs = format!("0x{}", hex::encode(root_hash));
         assert_eq!(rs.as_str(), hash);
 
         let mut trie = trie.at_root(root_hash);
-        let r2 = trie.commit().unwrap();
+        let r2 = trie.commit();
         let rs2 = format!("0x{}", hex::encode(r2));
         assert_eq!(rs2.as_str(), hash);
     }
@@ -549,13 +555,14 @@ mod trie_tests {
     // - https:github.com/ethereum/py-trie/blob/master/tests/test_proof.py
      #[test]
      fn test_proof_basic() {
-         let memdb = Arc::new(SqliteDB::new());
+         delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
          let mut trie = EthTrie::new(Arc::clone(&memdb));
-         trie.put(b"doe", b"reindeer").unwrap();
-         trie.put(b"dog", b"puppy").unwrap();
-         trie.put(b"dogglesworth", b"cat").unwrap();
-         let root = trie.commit().unwrap();
-         let r = format!("0x{}", hex::encode(trie.commit().unwrap()));
+         trie.put(b"doe", b"reindeer");
+         trie.put(b"dog", b"puppy");
+         trie.put(b"dogglesworth", b"cat");
+         let root = trie.commit();
+         let r = format!("0x{}", hex::encode(trie.commit()));
          assert_eq!(
              r.as_str(),
              "0x8aad789dff2f538bca5d8ea56e8abe10f4c7ba3a5dea95fea4cd6e7c3a1168d3"
@@ -609,7 +616,8 @@ mod trie_tests {
 
      #[test]
      fn test_proof_random() {
-         let memdb = Arc::new(SqliteDB::new());
+         delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
          let mut trie = EthTrie::new(Arc::clone(&memdb));
          let mut rng = rand::thread_rng();
          let mut keys = vec![];
@@ -617,13 +625,13 @@ mod trie_tests {
              let random_bytes: Vec<u8> = (0..rng.gen_range(2..30))
                  .map(|_| rand::random::<u8>())
                  .collect();
-             trie.put(&random_bytes, &random_bytes).unwrap();
+             trie.put(&random_bytes, &random_bytes);
              keys.push(random_bytes.clone());
          }
          for k in keys.clone().into_iter() {
-             trie.put(&k, &k).unwrap();
+             trie.put(&k, &k);
          }
-         let root = trie.commit().unwrap();
+         let root = trie.commit();
          for k in keys.into_iter() {
              let proof = trie.proof(&k).unwrap();
              let value = trie.verify_proof(root, &k, proof).unwrap().unwrap();
@@ -633,19 +641,21 @@ mod trie_tests {
 
      #[test]
      fn test_proof_empty_trie() {
-         let memdb = Arc::new(SqliteDB::new());
+         delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
          let mut trie = EthTrie::new(Arc::clone(&memdb));
-         trie.commit().unwrap();
+         trie.commit();
          let proof = trie.proof(b"not-exist").unwrap();
          assert_eq!(proof.len(), 0);
      }
 
      #[test]
      fn test_proof_one_element() {
-         let memdb = Arc::new(SqliteDB::new());
+         delete_file(String::from("test1.db"));
+        let memdb = Arc::new(SqliteDB::new(String::from("test1.db")));
          let mut trie = EthTrie::new(Arc::clone(&memdb));
-         trie.put(b"k", b"v").unwrap();
-         let root = trie.commit().unwrap();
+         trie.put(b"k", b"v");
+         let root = trie.commit();
          let proof = trie.proof(b"k").unwrap();
          assert_eq!(proof.len(), 1);
          let value = trie.verify_proof(root, b"k", proof.clone()).unwrap();
@@ -653,7 +663,7 @@ mod trie_tests {
 
         //remove key does not affect the verify process
          trie.del(b"k").unwrap();
-         let _root = trie.commit().unwrap();
+         let _root = trie.commit();
          let value = trie.verify_proof(root, b"k", proof).unwrap();
          assert_eq!(value, Some(b"v".to_vec()));
      }

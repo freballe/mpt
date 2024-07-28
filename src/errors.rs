@@ -8,7 +8,7 @@ use crate::nibbles::Nibbles;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TrieError {
-    DB(String),
+    SqliteDB(String),
     Decoder(DecoderError),
     InvalidData,
     InvalidProof,
@@ -25,7 +25,7 @@ impl Error for TrieError {}
 impl fmt::Display for TrieError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let printable = match *self {
-            TrieError::DB(ref err) => format!("trie error: {:?}", err),
+            TrieError::SqliteDB(ref err) => format!("trie error: {:?}", err),
             TrieError::Decoder(ref err) => format!("trie error: {:?}", err),
             TrieError::InvalidData => "trie error: invalid data".to_owned(),
             TrieError::InvalidProof => "trie error: invalid proof".to_owned(),
@@ -41,13 +41,13 @@ impl From<DecoderError> for TrieError {
     }
 }
 
-#[derive(Debug)]
-pub enum SqliteDBError {}
+// #[derive(Debug)]
+// pub struct SqliteDBError {}
 
-impl Error for SqliteDBError {}
+// impl Error for SqliteDBError {}
 
-impl fmt::Display for SqliteDBError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "error")
-    }
-}
+// impl fmt::Display for SqliteDBError {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         write!(f, "error")
+//     }
+// }
