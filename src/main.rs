@@ -74,40 +74,6 @@ fn test_small_trie_at_root() {
 }
 
 fn main() -> Result<()> {
-    // let conn = Connection::open("trie.db").unwrap();
-
-    // _ = conn.execute(
-    //     "CREATE TABLE trie (
-    //         key BLOB PRIMARY KEY,
-    //         data BLOB
-    //     )",
-    //     (), // empty list of parameters.
-    // );
-    
-    // let me = NodeDB {
-    //     key: vec![5,5,5,6],
-    //     data: Some(vec![1,2,3,4]),
-    // };
-    // _ = conn.execute(
-    //     "INSERT INTO trie (key, data) VALUES (?1, ?2)",
-    //     (&me.key, &me.data),
-    // )?;
-    // let mut stmt = conn.prepare("DELETE FROM trie WHERE key=?1")?;
-    // stmt.execute([me.key.clone()]);
-
-    // let mut stmt = conn.prepare("SELECT data FROM trie WHERE key=?1")?;
-    // let node_iter = stmt.query_map([me.key.clone()], |row| {
-    //     Ok(NodeDB {
-    //         key: row.get(0)?,
-    //         data: row.get(1)?,
-    //     })
-    // })?;
-
-    // for node in node_iter {
-    //     println!("Found node {:?}", node.unwrap());
-    // }
-    // println!("Finished");
-
     test_trie_remove();
     insert_full_branch();
     test_small_trie_at_root();
