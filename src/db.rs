@@ -1,9 +1,5 @@
-use std::collections::HashMap;
 use std::error::Error;
-use std::sync::Arc;
-
-use parking_lot::RwLock;
-
+use rusqlite::{params, Connection, Result};
 use crate::errors::MemDBError;
 
 /// "DB" defines the "trait" of trie and database interaction.
@@ -12,16 +8,16 @@ use crate::errors::MemDBError;
 pub trait DB: Send + Sync {
     type Error: Error;
 
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>;
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, bool>;
 
     /// Insert data into the cache.
-    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), Self::Error>;
+    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), bool>;
 
     /// Remove data with given key.
-    fn remove(&self, key: &[u8]) -> Result<(), Self::Error>;
+    fn remove(&self, key: &[u8]) -> Result<(), bool>;
 
     /// Insert a batch of data into the cache.
-    fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), Self::Error> {
+    fn insert_batch(&self, keys: Vec<Vec<u8>>, values: Vec<Vec<u8>>) -> Result<(), bool> {
         for i in 0..keys.len() {
             let key = &keys[i];
             let value = values[i].clone();
@@ -31,7 +27,7 @@ pub trait DB: Send + Sync {
     }
 
     /// Remove a batch of data into the cache.
-    fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), Self::Error> {
+    fn remove_batch(&self, keys: &[Vec<u8>]) -> Result<(), bool> {
         for key in keys {
             self.remove(key)?;
         }
@@ -39,87 +35,102 @@ pub trait DB: Send + Sync {
     }
 
     /// Flush data to the DB from the cache.
-    fn flush(&self) -> Result<(), Self::Error>;
+    fn flush(&self) -> Result<(), bool>;
 
-    #[cfg(test)]
-    fn len(&self) -> Result<usize, Self::Error>;
-    #[cfg(test)]
-    fn is_empty(&self) -> Result<bool, Self::Error>;
+    // #[cfg(test)]
+    // fn len(&self) -> Result<usize, bool>;
+    // #[cfg(test)]
+    // fn is_empty(&self) -> Result<bool, bool>;
 }
 
 #[derive(Default, Debug)]
-pub struct MemoryDB {
-    // If "light" is true, the data is deleted from the database at the time of submission.
-    light: bool,
-    storage: Arc<RwLock<HashMap<Vec<u8>, Vec<u8>>>>,
+pub struct SqliteDB {
+    db_name: String,
 }
 
-impl MemoryDB {
-    pub fn new(light: bool) -> Self {
-        MemoryDB {
-            light,
-            storage: Arc::new(RwLock::new(HashMap::new())),
+#[derive(Debug)]
+struct NodeDB {
+    key: Vec<u8>,
+    data: Option<Vec<u8>>,
+}
+
+impl SqliteDB {
+    pub fn new() -> Self {
+        return SqliteDB {
+            db_name: String::from("trie.db")
         }
     }
 }
 
-impl DB for MemoryDB {
+// TODO catch all errors
+impl DB for SqliteDB {
     type Error = MemDBError;
 
-    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
-        if let Some(value) = self.storage.read().get(key) {
-            Ok(Some(value.clone()))
-        } else {
-            Ok(None)
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>, bool> {
+        let conn = Connection::open(self.db_name.clone()).unwrap();
+
+        _ = conn.execute(
+            "CREATE TABLE trie (
+                key BLOB PRIMARY KEY,
+                data BLOB
+            )",
+            (), // empty list of parameters.
+        );
+
+        // let mut stmt = conn.prepare("SELECT key, data FROM trie").unwrap();
+        // let node_iter = stmt.query_map([], |row| {
+        //     Ok(NodeDB {
+        //         key: row.get(0)?,
+        //         data: row.get(1)?,
+        //     })
+        // }).unwrap();
+
+        let mut stmt = conn.prepare("SELECT key, data FROM trie WHERE key=?1").unwrap();
+        let node_iter = stmt.query_map([key], |row| {
+            Ok(NodeDB {
+                key: row.get(0)?,
+                data: row.get(1)?,
+            })
+        }).unwrap();
+        
+        for node in node_iter {
+            return Ok(node.unwrap().data.clone());
         }
+
+        Ok(None)
     }
 
-    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), Self::Error> {
-        self.storage.write().insert(key.to_vec(), value);
+    fn insert(&self, key: &[u8], value: Vec<u8>) -> Result<(), bool> {
+        let conn = Connection::open(self.db_name.clone()).unwrap();
+
+        _ = conn.execute(
+            "CREATE TABLE trie (
+                key BLOB PRIMARY KEY,
+                data BLOB
+            )",
+            (), // empty list of parameters.
+        );
+        let node_to_add = NodeDB {
+            key: key.to_vec(),
+            data: Some(value),
+        };
+        _ = conn.execute(
+            "INSERT INTO trie (key, data) VALUES (?1, ?2)",
+            (&node_to_add.key, &node_to_add.data),
+        );
         Ok(())
     }
 
-    fn remove(&self, key: &[u8]) -> Result<(), Self::Error> {
-        if self.light {
-            self.storage.write().remove(key);
-        }
+    fn remove(&self, key: &[u8]) -> Result<(), bool> {
+        let conn = Connection::open(self.db_name.clone()).unwrap();
+
+        let mut stmt = conn.prepare("DELETE FROM trie WHERE key=?1").unwrap();
+        stmt.execute([key.clone()]);
+    
         Ok(())
     }
 
-    fn flush(&self) -> Result<(), Self::Error> {
+    fn flush(&self) -> Result<(),  bool> {
         Ok(())
-    }
-
-    #[cfg(test)]
-    fn len(&self) -> Result<usize, Self::Error> {
-        Ok(self.storage.try_read().unwrap().len())
-    }
-    #[cfg(test)]
-    fn is_empty(&self) -> Result<bool, Self::Error> {
-        Ok(self.storage.try_read().unwrap().is_empty())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_memdb_get() {
-        let memdb = MemoryDB::new(true);
-        memdb.insert(b"test-key", b"test-value".to_vec()).unwrap();
-        let v = memdb.get(b"test-key").unwrap().unwrap();
-
-        assert_eq!(v, b"test-value")
-    }
-
-    #[test]
-    fn test_memdb_remove() {
-        let memdb = MemoryDB::new(true);
-        memdb.insert(b"test", b"test".to_vec()).unwrap();
-
-        memdb.remove(b"test").unwrap();
-        let contains = memdb.get(b"test").unwrap();
-        assert_eq!(contains, None)
     }
 }

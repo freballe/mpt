@@ -6,7 +6,7 @@ use keccak_hash::{keccak, KECCAK_NULL_RLP};
 use log::warn;
 use rlp::{Prototype, Rlp, RlpStream};
 
-use crate::db::{MemoryDB, DB};
+use crate::db::{SqliteDB, DB};
 use crate::errors::TrieError;
 use crate::nibbles::Nibbles;
 use crate::node::{empty_children, BranchNode, Node};
@@ -253,7 +253,8 @@ where
     /// Returns the value for key stored in the trie.
     fn get(&self, key: &[u8]) -> TrieResult<Option<Vec<u8>>> {
         let path = &Nibbles::from_raw(key, true);
-        let result = self.get_at(&self.root, path, 0);
+        let result: Result<Option<Vec<u8>>, TrieError> = self.get_at(&self.root, path, 0);
+        
         if let Err(TrieError::MissingTrieNode {
             node_hash,
             traversed,
@@ -377,7 +378,7 @@ where
         key: &[u8],
         proof: Vec<Vec<u8>>,
     ) -> TrieResult<Option<Vec<u8>>> {
-        let proof_db = Arc::new(MemoryDB::new(true));
+        let proof_db = Arc::new(SqliteDB::new());
         for node_encoded in proof.into_iter() {
             let hash: H256 = keccak(&node_encoded).as_fixed_bytes().into();
 
@@ -926,20 +927,20 @@ mod tests {
     use keccak_hash::KECCAK_NULL_RLP;
 
     use super::{EthTrie, ITrie};
-    use crate::db::{MemoryDB, DB};
+    use crate::db::{SqliteDB, DB};
     use crate::errors::TrieError;
     use crate::nibbles::Nibbles;
 
     #[test]
     fn test_trie_insert() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let mut trie = EthTrie::new(memdb);
         trie.put(b"test", b"test").unwrap();
     }
 
     #[test]
     fn test_trie_get() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let mut trie = EthTrie::new(memdb);
         trie.put(b"test", b"test").unwrap();
         let v = trie.get(b"test").unwrap();
@@ -949,7 +950,7 @@ mod tests {
 
     #[test]
     fn test_trie_get_missing() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let mut trie = EthTrie::new(memdb);
         trie.put(b"test", b"test").unwrap();
         let v = trie.get(b"no-val").unwrap();
@@ -957,8 +958,8 @@ mod tests {
         assert_eq!(None, v)
     }
 
-    fn corrupt_trie() -> (EthTrie<MemoryDB>, H256, H256) {
-        let memdb = Arc::new(MemoryDB::new(true));
+    fn corrupt_trie() -> (EthTrie<SqliteDB>, H256, H256) {
+        let memdb = Arc::new(SqliteDB::new());
         let corruptor_db = memdb.clone();
         let mut trie = EthTrie::new(memdb);
         trie.put(b"test1-key", b"really-long-value1-to-prevent-inlining")
@@ -1103,7 +1104,7 @@ mod tests {
 
     #[test]
     fn test_trie_random_insert() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let mut trie = EthTrie::new(memdb);
 
         for _ in 0..1000 {
@@ -1123,7 +1124,7 @@ mod tests {
 
     #[test]
     fn test_trie_remove() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let mut trie = EthTrie::new(memdb);
         trie.put(b"test", b"test").unwrap();
         let removed = trie.del(b"test").unwrap();
@@ -1132,7 +1133,7 @@ mod tests {
 
     #[test]
     fn test_trie_random_remove() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let mut trie = EthTrie::new(memdb);
 
         for _ in 0..1000 {
@@ -1151,7 +1152,7 @@ mod tests {
 
     #[test]
     fn test_trie_at_root_six_keys() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let root = {
             let mut trie = EthTrie::new(memdb.clone());
             trie.put(b"test", b"test").unwrap();
@@ -1174,7 +1175,7 @@ mod tests {
 
     #[test]
     fn test_trie_at_root_and_insert() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let root = {
             let mut trie = EthTrie::new(Arc::clone(&memdb));
             trie.put(b"test", b"test").unwrap();
@@ -1195,7 +1196,7 @@ mod tests {
 
     #[test]
     fn test_trie_at_root_and_delete() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let root = {
             let mut trie = EthTrie::new(Arc::clone(&memdb));
             trie.put(b"test", b"test").unwrap();
@@ -1223,14 +1224,14 @@ mod tests {
         let v: ethereum_types::H256 = ethereum_types::H256::random();
 
         let root1 = {
-            let memdb = Arc::new(MemoryDB::new(true));
+            let memdb = Arc::new(SqliteDB::new());
             let mut trie = EthTrie::new(memdb);
             trie.put(k0.as_bytes(), v.as_bytes()).unwrap();
             trie.commit().unwrap()
         };
 
         let root2 = {
-            let memdb = Arc::new(MemoryDB::new(true));
+            let memdb = Arc::new(SqliteDB::new());
             let mut trie = EthTrie::new(memdb);
             trie.put(k0.as_bytes(), v.as_bytes()).unwrap();
             trie.put(k1.as_bytes(), v.as_bytes()).unwrap();
@@ -1240,7 +1241,7 @@ mod tests {
         };
 
         let root3 = {
-            let memdb = Arc::new(MemoryDB::new(true));
+            let memdb = Arc::new(SqliteDB::new());
             let mut trie1 = EthTrie::new(Arc::clone(&memdb));
             trie1.put(k0.as_bytes(), v.as_bytes()).unwrap();
             trie1.put(k1.as_bytes(), v.as_bytes()).unwrap();
@@ -1257,7 +1258,7 @@ mod tests {
 
     #[test]
     fn test_delete_stale_keys_with_random_insert_and_delete() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let mut trie = EthTrie::new(memdb);
 
         let mut rng = rand::thread_rng();
@@ -1285,7 +1286,7 @@ mod tests {
 
     #[test]
     fn insert_full_branch() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let mut trie = EthTrie::new(memdb);
 
         trie.put(b"test", b"test").unwrap();
@@ -1302,7 +1303,7 @@ mod tests {
 
     #[test]
     fn iterator_trie() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let root1: H256;
         let mut kv = HashMap::new();
         kv.insert(b"test".to_vec(), b"test".to_vec());
@@ -1368,7 +1369,7 @@ mod tests {
 
     #[test]
     fn test_small_trie_at_root() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let mut trie = EthTrie::new(memdb.clone());
         trie.put(b"key", b"val").unwrap();
         let new_root_hash = trie.commit().unwrap();
@@ -1386,7 +1387,7 @@ mod tests {
 
     #[test]
     fn test_large_trie_at_root() {
-        let memdb = Arc::new(MemoryDB::new(true));
+        let memdb = Arc::new(SqliteDB::new());
         let mut trie = EthTrie::new(memdb.clone());
         trie.put(
             b"pretty-long-key",
